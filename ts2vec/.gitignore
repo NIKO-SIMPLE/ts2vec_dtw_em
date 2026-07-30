@@ -1,0 +1,13 @@
+/datasets/*[!.py]
+.ipynb_checkpoints
+__pycache__
+training/*
+scripts/_nohup
+.rsync-filter
+
+/datasets/
+*.tsv
+*.csv
+*.arff
+*.npz
+*.h5
