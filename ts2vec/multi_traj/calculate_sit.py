@@ -23,36 +23,27 @@ class S_calculator:
     """计算DTW评分"""
 
     def calculate_DTW(self, F_x):
-        #1. 取维度
-        N,T=F_x.shape
+        N, T = F_x.shape
 
-        #2. 对所有轨迹做去均值中心化处理
-        mean_F_x = np.mean(F_x, axis=0)
-        F_x_centered = F_x - mean_F_x
+        # 去均值中心化（消除绝对位置影响）
+        #F_x_centered = F_x - np.mean(F_x, axis=0)
 
-        #3. 依次对每个轨迹求m
-        m = np.zeros(N)
+        # 上三角计算，避免重复 DTW
+        m_matrix = np.zeros((N, N))
         for i in range(N):
-            dist_sum = 0
-            for j in range(N):
-                if i == j:
-                    continue
-                else:
-                    alignment = dtw(F_x_centered[i],F_x_centered[j], dist_method='euclidean')
-                    d = alignment.distance
-                    dist_sum += d
-            m[i] = 1/(N-1) * dist_sum
+            for j in range(i + 1, N):
+                d = dtw(F_x[i], F_x[j], dist_method='euclidean').distance
+                m_matrix[i][j] = d
+                m_matrix[j][i] = d
+        m = m_matrix.sum(axis=1) / (N - 1)
 
-        m_mean = np.mean(m)
-        m_std =  np.std(m)
+        # Z-score + 防除零
+        m_std = max(np.std(m), 1e-8)
+        raw = -self.alpha_m * (m - np.mean(m)) / m_std
+        raw -= np.max(raw)  # 数值稳定
 
-        exp = np.zeros(N)
-        for i in range(N):
-            exp[i] = np.exp( -self.alpha_m * (m[i] - m_mean) / m_std)
-
-        exp_sum = np.sum(exp)
-        q_DTW = exp / exp_sum
-
+        exp = np.exp(raw)
+        q_DTW = exp / np.sum(exp)
         return q_DTW
 
     """计算ts2vec评分"""
@@ -83,6 +74,8 @@ class S_calculator:
             train_data,
         )  #N x T x output_dims
 
+        from scipy.ndimage import gaussian_filter1d
+        code = gaussian_filter1d(code, sigma=10.0, axis=1, mode='nearest')
         #5. 计算得分
         code_sum = np.sum(code, axis=0)
         code_sum_without_self = (code_sum - code) / (N - 1)
@@ -95,14 +88,17 @@ class S_calculator:
         n_std = np.std(n,axis=0)  #T x 1
         n_std = np.where(n_std == 0, 1e-10, n_std)
 
-        exp = np.exp(-self.alpha_n * (n - n_mean) / n_std)  # shape: (N, T)
+        # ⚠️ 补上数值稳定化（你原版缺失这一行）
+        scaled = -self.alpha_n * (n - n_mean) / n_std
+        scaled -= np.max(scaled, axis=0, keepdims=True)  # ← 关键！
 
-        exp_sum = np.sum(exp,axis=0)
-        q_ts2 = exp / exp_sum
+        exp = np.exp(scaled)
+        q_ts2 = exp / np.sum(exp, axis=0, keepdims=True)
 
         return q_ts2
 
     """计算总分"""
+    """
     def calculate_S(self, F_x):
         #1. 首先计算DTW评分和ts2评分
         q_DTW = self.calculate_DTW(F_x)
@@ -114,4 +110,31 @@ class S_calculator:
 
         s_it= exp / exp_sum
         return s_it
+    """
 
+    def timewise_normalized_softmax(self, weights_2d, alpha=5.0, eps=1e-66):
+        mean_per_time = np.mean(weights_2d, axis=0, keepdims=True)
+        std_per_time = np.std(weights_2d, axis=0, keepdims=True) + eps
+        weights_normalized = (weights_2d - mean_per_time) / std_per_time
+        scaled = alpha * weights_normalized
+        scaled -= np.max(scaled, axis=0, keepdims=True)
+        exp_scaled = np.exp(scaled)
+        softmaxed = exp_scaled / np.sum(exp_scaled, axis=0, keepdims=True)
+        max_per_time = np.max(softmaxed, axis=0, keepdims=True)
+        normalized = softmaxed / (max_per_time + eps)
+        return normalized
+
+    def calculate_S(self, F_x):
+        # 1. 计算原始评分
+        q_DTW = self.calculate_DTW(F_x)  # (N,)
+        q_ts2 = self.calculate_ts2vec(F_x)  # (N, T)
+
+        # 2. 几何平均融合（二维版本）
+        combined = (q_DTW[:, np.newaxis] ** self.lambda_c) * \
+                   (q_ts2 ** (1.0 - self.lambda_c))  # (N, T)
+
+        # 3-5. 用数值稳定的封装函数替代手写步骤
+        s_it = self.timewise_normalized_softmax(combined, alpha=self.alpha_c)
+        s_it = s_it/ np.sum(s_it,axis=0)
+
+        return s_it

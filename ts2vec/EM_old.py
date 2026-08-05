@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats import multivariate_normal
+
 class EM:
     def __init__(self,demoNum,demoLen,pdfNum,lambda_s=10.0,max_tier=100,tol=1e-6,D_z=1):
 

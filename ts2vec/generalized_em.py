@@ -1,4 +1,4 @@
-"""Generalized EM.py trajectory fusion, implemented from Equations (8) and (9).
+"""Generalized EM_old.py trajectory fusion, implemented from Equations (8) and (9).
 
 Input file layout (12345.txt): each row stores N trajectories consecutively,
 and each trajectory contains T time steps.  With N=10 and T=50, each row has
@@ -173,7 +173,7 @@ def initialize_gmm(x, z, component_count, random_state=42):
 
 def generalized_em(x, f, s, component_count=10, lambda_s=20.0,
                    max_iter=100, tolerance=1e-5, random_state=42):
-    """Run generalized EM.py and return the fused trajectory and model parameters.
+    """Run generalized EM_old.py and return the fused trajectory and model parameters.
 
     x: (Dx, T), f: (Dz, N, T), s: (N, T)
     """
